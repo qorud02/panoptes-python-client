@@ -6,9 +6,9 @@ from panoptes_client.caesar import Caesar
 from panoptes_client.aggregation import Aggregation
 
 if sys.version_info <= (3, 0):
-    from mock import patch, MagicMock
+    from mock import patch, MagicMock, call
 else:
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch, MagicMock, call
 
 
 class TestWorkflow(unittest.TestCase):
@@ -209,6 +209,70 @@ class TestWorkflow(unittest.TestCase):
 
         self.caesar_post_mock.assert_not_called()
         self.assertEqual('Invalid action for rule type', str(invalid_effect_err.exception))
+
+
+class TestAliceConfiguration(unittest.TestCase):
+    def assert_alice_configuration(self, options, alice_task_key, question_task_key):
+        workflow = Workflow({'id': '1', 'configuration': {}, 'retirement': {}, 'tasks': {}})
+        with patch.object(workflow, 'save_to_caesar') as save, \
+                patch.object(workflow, 'add_caesar_extractor') as extractor, \
+                patch.object(workflow, 'add_caesar_reducer') as reducer, \
+                patch.object(workflow, 'add_caesar_rule') as rule, \
+                patch.object(workflow, 'add_caesar_rule_effect') as effect:
+            rule.side_effect = [{'id': 12}, {'id': 34}]
+            workflow.configure_for_alice(**options)
+
+        save.assert_called_once_with(public_extracts=True, public_reductions=True)
+        self.assertEqual(extractor.call_args_list, [
+            call('question', 'complete', question_task_key, {'if_missing': 'ignore'}),
+            call('external', 'alice', alice_task_key, {
+                'url': 'https://aggregation-caesar.zooniverse.org/extractors/'
+                       f'line_text_extractor?task={alice_task_key}'
+            }),
+        ])
+        complete_filters = {
+            'filters': {
+                'extractor_keys': ['complete'],
+                'repeated_classifications': 'keep_first',
+            }
+        }
+        self.assertEqual(reducer.call_args_list, [
+            call('external', 'alice', {
+                'url': 'https://aggregation-caesar.zooniverse.org/reducers/'
+                       'optics_line_text_reducer?minimum_views=5&low_consensus_threshold=3',
+                'filters': {
+                    'extractor_keys': ['alice'],
+                    'repeated_classifications': 'keep_first',
+                },
+            }),
+            call('stats', 'complete', complete_filters),
+            call('count', 'count', complete_filters),
+        ])
+        self.assertEqual(rule.call_args_list, [
+            call('["gte", ["lookup", "complete.0", 0], ["const", 3]]', 'subject'),
+            call('["gte", ["lookup", "count.classifications", 0], ["const", 30]]', 'subject'),
+        ])
+        alice_effect = {'url': 'https://tove.zooniverse.org/import', 'reducer_key': 'alice'}
+        self.assertEqual(effect.call_args_list, [
+            call('subject', 12, 'external', alice_effect),
+            call('subject', 12, 'retire_subject', {'reason': 'consensus'}),
+            call('subject', 34, 'external', alice_effect),
+            call('subject', 34, 'retire_subject', {'reason': 'classification_count'}),
+        ])
+
+    def test_configure_for_alice_defaults(self):
+        self.assert_alice_configuration({}, 'T0', 'T1')
+
+    def test_configure_for_alice_custom_alice_task(self):
+        self.assert_alice_configuration({'alice_task_key': 'T2'}, 'T2', 'T1')
+
+    def test_configure_for_alice_custom_question_task(self):
+        self.assert_alice_configuration({'question_task_key': 'T3'}, 'T0', 'T3')
+
+    def test_configure_for_alice_custom_tasks(self):
+        self.assert_alice_configuration(
+            {'alice_task_key': 'T2', 'question_task_key': 'T3'}, 'T2', 'T3'
+        )
 
 
 class TestAggregation(unittest.TestCase):

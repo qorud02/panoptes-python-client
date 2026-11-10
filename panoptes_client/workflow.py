@@ -514,20 +514,30 @@ class Workflow(PanoptesObject, Exportable):
         self.add_caesar_rule_effect('subject', count_subject_rule['id'], 'external', send_to_alice_effect_config)
         self.add_caesar_rule_effect('subject', count_subject_rule['id'], 'retire_subject', {'reason': 'classification_count'})
 
-    def configure_for_alice(self):
+    def configure_for_alice(self, alice_task_key='T0', question_task_key='T1'):
         """
         Configures workflow for ALICE/TOVE.
 
         - This method will add workflow to Caesar
-        - This method will create Caesar Extractors needed for ALICE with defaults.
+        - This method will create Caesar Extractors needed for ALICE.
+        - **alice_task_key** - Task ID for the Transcription Task step. Defaults to T0.
+        - **question_task_key** - Task ID for the "Have all the volunteer-made
+          underline marks turned grey?" step. Defaults to T1.
         - This method will also create Caesar Reducers needed for ALICE with defaults.
           (In particular, `minimum_views` = 5, and `low_consensus_threshold` = 3)
         - And this method will also create Caesar Subject Rules and Effects needed for ALICE with defaults.
           (In particular, Question-based retirement's retirement limit is 3 and Count-based retirement default is 30.)
 
+        Examples::
+
+            workflow.configure_for_alice()
+            workflow.configure_for_alice(alice_task_key='T2', question_task_key='T3')
+
         """
         self.save_to_caesar(public_extracts=True, public_reductions=True)
-        self.add_alice_extractors()
+        self.add_alice_extractors(
+            alice_task_key=alice_task_key, question_task_key=question_task_key
+        )
         self.add_alice_reducers()
         self.add_alice_rules_and_effects()
 
